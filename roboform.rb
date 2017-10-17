@@ -62,6 +62,32 @@ def step1 username, nonce, http
     }
 end
 
+def parse_auth_info header
+    realm, params = header.split " "
+
+    parsed_params = params
+        .split(",")
+        .map { |i| i =~ /(\w+)\="(.*)"/; [$1, $2] }
+        .to_h
+
+    sid = parsed_params["sid"]
+    data = d64 parsed_params["data"]
+
+    parsed_data = data
+        .split(",")
+        .map { |i| i =~ /(\w+)\=(.*)/; [$1, $2] }
+        .to_h
+
+    {
+        sid: sid,
+        data: data,
+        nonce: parsed_data["r"],
+        salt: d64(parsed_data["s"]),
+        iterations: parsed_data["i"].to_i,
+        md5?: parsed_data.fetch("o", "").include?("pwdMD5")
+    }
+end
+
 def login username, password, http
     nonce = generate_nonce
 
@@ -70,6 +96,7 @@ def login username, password, http
 
     code = response.code
     if code == 401
+        auth_info = parse_auth_info response.headers["WWW-Authenticate"]
     elsif code != 200
         raise "Step 1: Network request failed with HTTP status #{code}"
     end
@@ -77,7 +104,35 @@ def login username, password, http
     response.parsed_response
 end
 
+#
+# Tests
+#
+
+def check expression, message = ""
+    raise message if !expression
+end
+
+def test_parse_auth_info
+    auth_info = parse_auth_info 'SibAuth sid="6Ag93Y02vihucO9IQl1fbg",data' +
+                                '="cj0tRGVIUnJaakM4RFpfMGU4UkdzaXNnTTItdGp' +
+                                'nZi02MG0tLUZCaExRMjZ0ZyxzPUErRnQ4VU02NzRP' +
+                                'Wk9PalVqWENkYnc9PSxpPTQwOTY="'
+    check auth_info[:sid] == "6Ag93Y02vihucO9IQl1fbg"
+    check auth_info[:data] == "r=-DeHRrZjC8DZ_0e8RGsisgM2-tjgf-60m--FBhLQ26tg,s=A+Ft8UM674OZOOjUjXCdbw==,i=4096"
+    check auth_info[:nonce] == "-DeHRrZjC8DZ_0e8RGsisgM2-tjgf-60m--FBhLQ26tg"
+    check auth_info[:salt] == d64("A+Ft8UM674OZOOjUjXCdbw==")
+    check auth_info[:iterations] == 4096
+    check auth_info[:md5?] == false
+end
+
+#
+# main
+#
+
 config = YAML.load_file "config.yaml"
 http = Http.new
+
+# Poor man's tests
+test_parse_auth_info
 
 login config["username"], config["password"], http
