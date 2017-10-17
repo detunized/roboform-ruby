@@ -55,9 +55,26 @@ def step1_authorization_header username, nonce
     %Q{SibAuth realm="RoboForm Online Server",data="#{data}"}
 end
 
+def step1 username, nonce, http
+    encoded_username = encodeURI username
+    http.post "https://online.roboform.com/rf-api/#{encoded_username}?login", {}, {
+        Authorization: step1_authorization_header(username, nonce)
+    }
+end
+
 def login username, password, http
     nonce = generate_nonce
-    step1_authorization_header username, nonce
+
+    # Step 1
+    response = step1 username, nonce, http
+
+    code = response.code
+    if code == 401
+    elsif code != 200
+        raise "Step 1: Network request failed with HTTP status #{code}"
+    end
+
+    response.parsed_response
 end
 
 config = YAML.load_file "config.yaml"
