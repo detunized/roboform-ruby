@@ -1,3 +1,5 @@
 #!/usr/bin/env ruby
 
-p "Yo, RoboForm"
+require "yaml"
+
+config = YAML.load_file "config.yaml"
