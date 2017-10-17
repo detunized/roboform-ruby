@@ -6,6 +6,7 @@
 require "base64"
 require "httparty"
 require "securerandom"
+require "uri"
 require "yaml"
 
 DISABLE_RANDOM = true
@@ -25,6 +26,20 @@ class Http
     end
 end
 
+def d64 s
+    Base64.decode64 s
+end
+
+def e64 s
+    Base64.strict_encode64 s
+end
+
+# JavaScript encodeURI equivalent
+# See: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURI
+def encodeURI s
+    URI.escape s, /[^A-Za-z0-9;,\/?:@&=+$\-_.!~*'()#]/
+end
+
 def generate_nonce length = 16
     if DISABLE_RANDOM
         "-DeHRrZjC8DZ_0e8RGsisg"
@@ -34,9 +49,15 @@ def generate_nonce length = 16
     end
 end
 
+def step1_authorization_header username, nonce
+    encoded_username = encodeURI username
+    data = e64 "n,,n=#{encoded_username},r=#{nonce}"
+    %Q{SibAuth realm="RoboForm Online Server",data="#{data}"}
+end
+
 def login username, password, http
-    username = URI.escape username
     nonce = generate_nonce
+    step1_authorization_header username, nonce
 end
 
 config = YAML.load_file "config.yaml"
