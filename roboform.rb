@@ -5,6 +5,7 @@
 
 require "base64"
 require "httparty"
+require "openssl"
 require "securerandom"
 require "uri"
 require "yaml"
@@ -100,8 +101,18 @@ def hash_password password, auth_info
                                "sha256"
 end
 
+def compute_client_key hashed_password
+    OpenSSL::HMAC.digest "sha256", hashed_password, "Client Key"
+end
+
+def compute_client_hash client_key
+    Digest::SHA256.digest client_key
+end
+
 def step2 username, password, nonce, auth_info, http
     hashed_password = hash_password password, auth_info
+    client_key = compute_client_key hashed_password
+    client_hash = compute_client_hash client_key
 end
 
 def login username, password, http
@@ -152,6 +163,18 @@ def test_hash_password config
     }
 
     check hashed == d64("b+rd7TUt65+hdE7+lHCBPPWHjxbq6qs0y7zufYfqHto=")
+end
+
+def test_compute_client_key config
+    key = compute_client_key d64("b+rd7TUt65+hdE7+lHCBPPWHjxbq6qs0y7zufYfqHto=")
+
+    check key == d64("8sbDhSTLwbl0FhiHAxFxGUQvQwcr4JIbpExO64+Jj8o=")
+end
+
+def test_compute_client_hash config
+    hash = compute_client_hash d64("8sbDhSTLwbl0FhiHAxFxGUQvQwcr4JIbpExO64+Jj8o=")
+
+    check hash == d64("RXO9q9pvaxlHnzGELfdRgzeb8G1KvG9/TkSPyFZK/G0=")
 end
 
 #
