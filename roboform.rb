@@ -134,36 +134,52 @@ def step2_authorization_header username, password, nonce, auth_info
     %Q{SibAuth sid="#{auth_info[:sid]}",data="#{data}"}
 end
 
-def step1 username, nonce, http
+def auth_step username, header, http
     encoded_username = encodeURI username
     http.post "https://online.roboform.com/rf-api/#{encoded_username}?login", {}, {
-        Authorization: step1_authorization_header(username, nonce)
+        Authorization: header
     }
 end
 
+def step1 username, nonce, http
+    auth_step username,
+              step1_authorization_header(username, nonce),
+              http
+end
+
 def step2 username, password, nonce, auth_info, http
-    encoded_username = encodeURI username
-    http.post "https://online.roboform.com/rf-api/#{encoded_username}?login", {}, {
-        Authorization: step2_authorization_header(username, password, nonce, auth_info)
-    }
+    auth_step username,
+              step2_authorization_header(username, password, nonce, auth_info),
+              http
+end
+
+def parse_login_response response
+    cookies = response.headers.get_fields("set-cookie") || []
+    auth_cookie = cookies.find { |i| i =~ /^sib-auth=/ }
+    raise "Auth cookie not found in response" if auth_cookie.nil?
+
+    { auth_cookie: auth_cookie }
 end
 
 def login username, password, http
     nonce = generate_nonce
 
     # Step 1
+    step = 1
     response = step1 username, nonce, http
-
     if response.code == 401
         auth_info = parse_auth_info response.headers["WWW-Authenticate"]
+
+        # Step 2
+        step = 2
         response = step2 username, password, nonce, auth_info, http
     end
 
     if response.code != 200
-        raise "Step 1: Network request failed with HTTP status #{response.code}"
+        raise "Auth step #{step}: network request failed with HTTP status #{response.code}"
     end
 
-    response.parsed_response
+    parse_login_response response
 end
 
 #
