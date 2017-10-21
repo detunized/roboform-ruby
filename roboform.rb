@@ -53,6 +53,10 @@ def hmac key, message
     OpenSSL::HMAC.digest "sha256", key, message
 end
 
+#
+# Login
+#
+
 def generate_nonce length = 16
     if DISABLE_RANDOM
         "-DeHRrZjC8DZ_0e8RGsisg"
@@ -60,19 +64,6 @@ def generate_nonce length = 16
         b64 = Base64.urlsafe_encode64 SecureRandom.random_bytes length
         b64.sub /\=*$/, ""
     end
-end
-
-def step1_authorization_header username, nonce
-    encoded_username = encodeURI username
-    data = e64 "n,,n=#{encoded_username},r=#{nonce}"
-    %Q{SibAuth realm="RoboForm Online Server",data="#{data}"}
-end
-
-def step1 username, nonce, http
-    encoded_username = encodeURI username
-    http.post "https://online.roboform.com/rf-api/#{encoded_username}?login", {}, {
-        Authorization: step1_authorization_header(username, nonce)
-    }
 end
 
 def parse_auth_info header
@@ -121,6 +112,13 @@ def compute_client_hash client_key
     Digest::SHA256.digest client_key
 end
 
+def step1_authorization_header username, nonce
+    encoded_username = encodeURI username
+    data = e64 "n,,n=#{encoded_username},r=#{nonce}"
+
+    %Q{SibAuth realm="RoboForm Online Server",data="#{data}"}
+end
+
 def step2_authorization_header username, password, nonce, auth_info
     hashed_password = hash_password password, auth_info
     client_key = compute_client_key hashed_password
@@ -136,9 +134,16 @@ def step2_authorization_header username, password, nonce, auth_info
     %Q{SibAuth sid="#{auth_info[:sid]}",data="#{data}"}
 end
 
+def step1 username, nonce, http
+    encoded_username = encodeURI username
+    http.post "https://online.roboform.com/rf-api/#{encoded_username}?login", {}, {
+        Authorization: step1_authorization_header(username, nonce)
+    }
+end
+
 def step2 username, password, nonce, auth_info, http
     encoded_username = encodeURI username
-    response = http.post "https://online.roboform.com/rf-api/#{encoded_username}?login", {}, {
+    http.post "https://online.roboform.com/rf-api/#{encoded_username}?login", {}, {
         Authorization: step2_authorization_header(username, password, nonce, auth_info)
     }
 end
