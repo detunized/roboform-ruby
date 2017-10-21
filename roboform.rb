@@ -190,6 +190,13 @@ def login username, password, http
     parse_login_response response
 end
 
+def logout session, username, http
+    encoded_username = encodeURI username
+    response = http.post "https://online.roboform.com/rf-api/#{encoded_username}?logout", {}, {
+        "Cookie" => session[:auth_cookie]
+    }
+end
+
 #
 # Tests
 #
@@ -276,4 +283,5 @@ private_methods.grep(/^test_/).each do |i|
     send i, config
 end
 
-#login config["username"], config["password"], http
+session = login config["username"], config["password"], http
+logout session, config["username"], http
