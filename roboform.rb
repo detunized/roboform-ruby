@@ -27,6 +27,10 @@ class Http
     end
 end
 
+#
+# Utils
+#
+
 def d64 s
     Base64.decode64 s
 end
@@ -39,6 +43,14 @@ end
 # See: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURI
 def encodeURI s
     URI.escape s, /[^A-Za-z0-9;,\/?:@&=+$\-_.!~*'()#]/
+end
+
+#
+# Crypto
+#
+
+def hmac key, message
+    OpenSSL::HMAC.digest "sha256", key, message
 end
 
 def generate_nonce length = 16
@@ -102,17 +114,33 @@ def hash_password password, auth_info
 end
 
 def compute_client_key hashed_password
-    OpenSSL::HMAC.digest "sha256", hashed_password, "Client Key"
+    hmac hashed_password, "Client Key"
 end
 
 def compute_client_hash client_key
     Digest::SHA256.digest client_key
 end
 
-def step2 username, password, nonce, auth_info, http
+def step2_authorization_header username, password, nonce, auth_info
     hashed_password = hash_password password, auth_info
     client_key = compute_client_key hashed_password
     client_hash = compute_client_hash client_key
+
+    encoded_username = encodeURI username
+    hashing_material = "n=#{encoded_username},r=#{nonce},#{auth_info[:data]},c=biws,r=#{auth_info[:nonce]}"
+    hashed = hmac client_hash, hashing_material
+
+    proof = e64 client_key.bytes.zip(hashed.bytes).map { |i| i[0] ^ i[1] }.pack "c*"
+    data = e64 "c=biws,r=#{auth_info[:nonce]},p=#{proof}"
+
+    %Q{SibAuth sid="#{auth_info[:sid]}",data="#{data}"}
+end
+
+def step2 username, password, nonce, auth_info, http
+    encoded_username = encodeURI username
+    response = http.post "https://online.roboform.com/rf-api/#{encoded_username}?login", {}, {
+        Authorization: step2_authorization_header(username, password, nonce, auth_info)
+    }
 end
 
 def login username, password, http
@@ -175,6 +203,36 @@ def test_compute_client_hash config
     hash = compute_client_hash d64("8sbDhSTLwbl0FhiHAxFxGUQvQwcr4JIbpExO64+Jj8o=")
 
     check hash == d64("RXO9q9pvaxlHnzGELfdRgzeb8G1KvG9/TkSPyFZK/G0=")
+end
+
+def test_step1_authorization_header config
+    header = step1_authorization_header config["username"], "-DeHRrZjC8DZ_0e8RGsisg"
+
+    check header == 'SibAuth realm="RoboForm Online Server",data="biwsbj1s' +
+                    'YXN0cGFzcy5ydWJ5QGdtYWlsLmNvbSxyPS1EZUhSclpqQzhEWl8wZ' +
+                    'ThSR3Npc2c="'
+end
+
+def test_step2_authorization_header config
+    auth_info = {
+        salt: d64("A+Ft8UM674OZOOjUjXCdbw=="),
+        iterations: 4096,
+        md5?: false,
+        sid: "6Ag93Y02vihucO9IQl1fbg",
+        nonce: "-DeHRrZjC8DZ_0e8RGsisgM2-tjgf-60m--FBhLQ26tg",
+        data: "cj0tRGVIUnJaakM4RFpfMGU4UkdzaXNnTTItdGpnZi02MG0tLUZCaExRMjZ" +
+              "0ZyxzPUErRnQ4VU02NzRPWk9PalVqWENkYnc9PSxpPTQwOTY="
+    }
+
+    header = step2_authorization_header config["username"],
+                                        config["password"],
+                                        "-DeHRrZjC8DZ_0e8RGsisg",
+                                        auth_info
+
+    check header == 'SibAuth sid="6Ag93Y02vihucO9IQl1fbg",data="Yz1iaXdzLH' +
+                    'I9LURlSFJyWmpDOERaXzBlOFJHc2lzZ00yLXRqZ2YtNjBtLS1GQmh' +
+                    'MUTI2dGcscD1VdGQvV3FCSm5SU2pyeTBRTCswa3owUCtDUk5rcXRC' +
+                    'YytySHVmRHllaUhrPQ=="'
 end
 
 #
