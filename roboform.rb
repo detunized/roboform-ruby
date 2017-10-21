@@ -155,10 +155,18 @@ end
 
 def parse_login_response response
     cookies = response.headers.get_fields("set-cookie") || []
-    auth_cookie = cookies.find { |i| i =~ /^sib-auth=/ }
-    raise "Auth cookie not found in response" if auth_cookie.nil?
 
-    { auth_cookie: auth_cookie }
+    token = cookies.find { |i| i =~ /^sib-auth=/ }
+    raise "Auth token cookie not found in response" if token.nil?
+
+    device = cookies.find { |i| i =~ /^sib-deviceid=/ }
+    raise "Device ID cookie not found in response" if device.nil?
+
+    auth_cookies = HTTParty::CookieHash.new
+    auth_cookies.add_cookies token
+    auth_cookies.add_cookies device
+
+    { auth_cookie: auth_cookies.to_cookie_string }
 end
 
 def login username, password, http
