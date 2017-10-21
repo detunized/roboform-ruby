@@ -1,3 +1,3 @@
 .PHONY: default
 default:
-	@bundle exec ruby -r ap roboform.rb
+	@bundle exec ruby -r ap -r pry roboform.rb
