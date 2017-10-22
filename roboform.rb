@@ -204,6 +204,13 @@ def logout session, username, http
     }
 end
 
+def get_user_data session, username, http
+    encoded_username = encodeURI username
+    response = http.get "https://online.roboform.com/rf-api/#{encoded_username}/user-data.rfo?_1337", {
+        "Cookie" => session[:auth_cookie]
+    }
+end
+
 #
 # Tests
 #
@@ -290,5 +297,7 @@ private_methods.grep(/^test_/).each do |i|
     send i, config
 end
 
-session = login config["username"], config["password"], http
-logout session, config["username"], http
+username = config["username"]
+session = login username, config["password"], http
+user_data = get_user_data session, username, http
+logout session, username, http
