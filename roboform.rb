@@ -16,7 +16,14 @@ class Http
     include HTTParty
 
     def initialize
+        @get_headers = {}
         @post_headers = {}
+    end
+
+    def get url, headers = {}
+        self.class.get url, {
+            headers: @get_headers.merge(headers)
+        }
     end
 
     def post url, args, headers = {}
