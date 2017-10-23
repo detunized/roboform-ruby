@@ -52,6 +52,18 @@ def encodeURI s
     URI.escape s, /[^A-Za-z0-9;,\/?:@&=+$\-_.!~*'()#]/
 end
 
+class StringIO
+    def read_format size, format
+        read(size).unpack(format)[0]
+    end
+end
+
+class Integer
+    def bit_set? index
+        (self & (1 << index)) != 0
+    end
+end
+
 #
 # Crypto
 #
@@ -212,6 +224,42 @@ def get_user_data session, username, http
 end
 
 #
+# Blob parser
+#
+
+def parse_onefile blob
+    StringIO.open blob do |io|
+        magic = io.read 8
+        raise "Invalid signature '#{magic}'" if magic != "onefile1"
+
+        flags = io.readbyte
+
+        has_checksum = flags.bit_set? 0
+        encrypted = flags.bit_set? 1
+        compressed = flags.bit_set? 2
+
+        if has_checksum
+            c = io.readbyte
+            raise "Checksum type #{c} is not supported" if c != 1
+        end
+
+        stream_length = io.read_format 4, "V"
+        stored_checksum = io.read 16
+        content = io.read stream_length
+
+        actual_checksum = Digest::MD5.digest content
+        raise "Invalid checksum" if actual_checksum != stored_checksum
+
+        parse_encrypted_stream content, {encrypted: encrypted, compressed: compressed}
+    end
+end
+
+def parse_encrypted_stream content, options
+    ap content.size
+    ap options
+end
+
+#
 # Tests
 #
 
@@ -285,6 +333,43 @@ def test_step2_authorization_header config
                     'YytySHVmRHllaUhrPQ=="'
 end
 
+def test_parse_onefile config
+    blob = d64 "b25lZmlsZTEHAU8FAABVlI9vpN8EKVpPnquRJrSYZ3NlbmNzdDEAAgAQAA" +
+               "AQlTM1snvUW6/VmXbjKu7l65tWu0R6/8YOu5yjBUMB24uwfGNA/EmFJuUz" +
+               "iYToeTliRlpgV6+CVfm7nJ/mwTmrHxPbkhrjLHQ+AAOeNSeEFyvxd8ntOl" +
+               "v5jCjsifPdMg/AjZbapv0PLB0z2/LOoM37SbN9JK/aF3JjYJwNsN8oEskA" +
+               "92B7qsmkawx55X5ixFc5rvcLjzL2qPkgzHxwftX1OPM6bJVQRTHQKXa7t9" +
+               "nqugLXI/ij24tGkTdbGmaOFg1nVO0+X0OubqqF41K8uO5ePSrA+e/OXvr6" +
+               "6hvvf2q168/uKNel74j20H5xJpZhY6VsgmQs3OSquOp2zJ7/TMJCnkgMuD" +
+               "mqWwY4O5KIloaoK3qMLdbKiyjmsg3QCsOBxIRw2QTWeuyhJSTcFDgauima" +
+               "oKNYxNUfi8K18/R9WBt+rLmP7v8ZKmKu2QGKbAwO05zhvXhq5VOau7R9CD" +
+               "KNVexeGbb86+cyxIcM0uf2ds9nLLMZPHUj5kYvj+frtMUQq2ToOsbEPdeG" +
+               "68tG1f4yosEkifseXfWrWzMrAGeOfh2Q1yLFCzv7ATqjAsooWR1nfk5air" +
+               "xf3nDqToPllb+C6DVHqvp8UadZXnhdj5kxvfd0BqOSu/lZFsGaJFxrGSzG" +
+               "ZTx6kxZrUUnVLOoPfNJwmcADGI0hRXbZdbmxaXHnMuRtqOXspxKsgu2H6D" +
+               "sIoJwgntGazg99oBvkf90Mf8fjCKLIiBwbcqimiR+knKhCuijE6QUvCXqV" +
+               "INHj7dBKT83jGj/rgJ/GtfpKo/Rmm6EUoEJmKZ7YSqaNlPkW1NKaQxu56M" +
+               "DWQX2Ioc3hZU6S4oPbxyXm1vy9UxhgSFctg9pSeXa+BDUTuxhRE1HZ6f0g" +
+               "lUz1sWVyE8WOToWndlRWDEM+G6+RYHlmADAq67NYLxssYC3Enej300qxY1" +
+               "pAxKlWF4MPTH+ued9IHNjTgA5bJhSRimrBEGFrESICVii3RKljDnviib1Q" +
+               "K+74vaK47Jd+jGn+8cunD7lSnilTms1u/7uqgbhXzf9426pe92WoHFpmqb" +
+               "I6FvLSvycl9oEzaVnayoGntJ2A5UJ6uROw2srChfx64uabVy0yxkU+86zH" +
+               "VuN/QJcWKSmQmR7HHrWutOizDed1+uXgj8AGb7XQiiDgpGRt4TE/WSsvjv" +
+               "6CCy+CI/xpiYrkmyezY+2OLF8v/PAW1qbwn/2ZKnRwJ3YI2DFr438CLO1O" +
+               "7xqEp0RC0+8GBlGWwZ9BfWNvE94+/QIP3pV+vojlaXPt8GeOlesCSfpFXs" +
+               "8gQmSdOoriRhxW98zGyZugwM27E/epOGKyghYfShIqVtYGtLKiF5kbvNXs" +
+               "NaiB5WgPzg/5ygh26IgsdT8U8+0cdEbmZQdhRGEsNdIOjFExZRkWlAllgS" +
+               "HfFyj0YL6U6DGlhDY9iLFjlJQlrCzo05MoatNMRt82VLfIys47YluU9wZO" +
+               "x/7QdcKd6czz4te4SAFGDmvCL5HVuAV+sPHQG5azADUGMO8g/a+ImJic+U" +
+               "/5rHTvDYMaveuWBHLi5LY7SlTnq6qju4qZXdiX8oh8xWND6DCCyg9zH7rQ" +
+               "r5c3m8z6Bq8z/9cG2cpWUXJlG+gdp3H1DFIgxmnEu8nzyVfxx0fg+TpTJy" +
+               "eMVrbH7rZ8f7uSkzKMVLSxIfnuk1yNHDsOrTpG76zXnHVil+hNczDw9MFO" +
+               "IhH7LnWjSzGX4klWJnGtWQcV2vB3qtoPvRgo24L4dUpT+6XsYJLcWdOIe0" +
+               "dRXjXomQAUTZoDmTN31Pew+nlwBrzzFgB7C5KMG9lPKlClEbXbMaFSAAAA" +
+               "AA=="
+    parse_onefile blob
+end
+
 #
 # main
 #
@@ -296,6 +381,8 @@ http = Http.new
 private_methods.grep(/^test_/).each do |i|
     send i, config
 end
+
+exit
 
 username = config["username"]
 session = login username, config["password"], http
