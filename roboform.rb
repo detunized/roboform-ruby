@@ -293,9 +293,9 @@ def decrypt_content content, options, password
         reserved = io.read reserved_size
 
         padding = if reserved.size > 0 && reserved[0].ord.bit_set?(0)
-            0
+            0 # No padding
         else
-            nil
+            nil # OpenSSL defults to PKCS7 padding
         end
 
         key_iv = OpenSSL::PKCS5.pbkdf2_hmac password, salt, iterations, 64, kdf_hash
