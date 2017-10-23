@@ -72,6 +72,15 @@ def hmac key, message
     OpenSSL::HMAC.digest "sha256", key, message
 end
 
+def decrypt_aes ciphertext, key, iv, padding = nil
+    c = OpenSSL::Cipher.new "aes-256-cbc"
+    c.decrypt
+    c.key = key
+    c.iv = iv
+    c.padding = padding if padding
+    c.update(ciphertext) + c.final
+end
+
 #
 # Login
 #
@@ -227,7 +236,7 @@ end
 # Blob parser
 #
 
-def parse_onefile blob
+def parse_onefile blob, password
     StringIO.open blob do |io|
         magic = io.read 8
         raise "Invalid signature '#{magic}'" if magic != "onefile1"
@@ -243,20 +252,70 @@ def parse_onefile blob
             raise "Checksum type #{c} is not supported" if c != 1
         end
 
-        stream_length = io.read_format 4, "V"
+        content_length = io.read_format 4, "V"
         stored_checksum = io.read 16
-        content = io.read stream_length
+        content = io.read content_length
 
         actual_checksum = Digest::MD5.digest content
         raise "Invalid checksum" if actual_checksum != stored_checksum
 
-        parse_encrypted_stream content, {encrypted: encrypted, compressed: compressed}
+        raw = decrypt_content content,
+                             {encrypted: encrypted, compressed: compressed},
+                             password
+
+        JSON.load raw
     end
 end
 
-def parse_encrypted_stream content, options
-    ap content.size
-    ap options
+def decrypt_content content, options, password
+    StringIO.open content do |io|
+        magic = io.read 8
+        raise "Invalid signature '#{magic}'" if magic != "gsencst1"
+
+        reserved_size = io.readbyte
+
+        kdf_algorithm = io.readbyte
+        kdf_hash = ""
+        case kdf_algorithm
+        when 0, 1
+            raise "SHA-1 KDF is not supported"
+        when 2
+            kdf_hash = "sha256"
+        when 3, 4
+            kdf_hash = "sha512"
+        else
+            raise "KDF algorithm #{kdf_algorithm} is not supported"
+        end
+
+        iterations = io.read_format 4, "V"
+        salt_size = io.readbyte
+        salt = io.read salt_size
+        reserved = io.read reserved_size
+
+        padding = if reserved.size > 0 && reserved[0].ord.bit_set?(0)
+            0
+        else
+            nil
+        end
+
+        key_iv = OpenSSL::PKCS5.pbkdf2_hmac password, salt, iterations, 64, kdf_hash
+        key = key_iv[0, 32]
+        iv = key_iv[32, 16]
+
+        ciphertext = io.read
+        plaintext = decrypt_aes ciphertext, key, iv, padding
+
+        # Skip garbage
+        xor = 0xaa
+        start = 0
+        plaintext.bytes.each do |i|
+            start += 1
+            xor ^= i
+            break if xor == 0
+        end
+
+        Zlib::Inflate.new(Zlib::MAX_WBITS + 16).inflate plaintext[start..-1]
+    end
 end
 
 #
@@ -367,7 +426,10 @@ def test_parse_onefile config
                "IhH7LnWjSzGX4klWJnGtWQcV2vB3qtoPvRgo24L4dUpT+6XsYJLcWdOIe0" +
                "dRXjXomQAUTZoDmTN31Pew+nlwBrzzFgB7C5KMG9lPKlClEbXbMaFSAAAA" +
                "AA=="
-    parse_onefile blob
+    json = parse_onefile blob, config["password"]
+
+    check Hash === json
+    check json.keys == %w{i c}
 end
 
 #
