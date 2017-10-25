@@ -220,7 +220,7 @@ end
 
 def logout session, username, http
     encoded_username = encodeURI username
-    response = http.post "https://online.roboform.com/rf-api/#{encoded_username}?logout", {}, {
+    http.post "https://online.roboform.com/rf-api/#{encoded_username}?logout", {}, {
         "Cookie" => session[:auth_cookie]
     }
 end
@@ -230,6 +230,8 @@ def get_user_data session, username, http
     response = http.get "https://online.roboform.com/rf-api/#{encoded_username}/user-data.rfo?_1337", {
         "Cookie" => session[:auth_cookie]
     }
+
+    response.parsed_response
 end
 
 #
@@ -318,6 +320,60 @@ def decrypt_content content, options, password
     end
 end
 
+def parse_accounts json
+    traverse_parse get_root json
+end
+
+def get_root json
+    children = json["c"] || []
+    root = children[1] || {}
+
+    info = root["i"] || {}
+    raise "Root folder not found" if !info["F"] || info["n"] != "root"
+
+    root
+end
+
+def traverse_parse root
+    accounts = []
+    traverse_folder root["c"] || [], "", accounts
+
+    accounts
+end
+
+def traverse_folder entries, path, accounts
+    entries.each do |entry|
+        info = entry["i"] || {}
+        name = info["n"] || ""
+        if info["F"]
+            traverse_folder entry["c"] || [],
+                            path.empty? ? name : "#{path}/#{name}",
+                            accounts
+        else
+            accounts << parse_account(entry["b"] || "{}", info["n"] || "", path)
+        end
+    end
+end
+
+
+def parse_account data, name, path
+    json = JSON.load data
+
+    {
+        name: name,
+        path: path,
+        url: json["g"] || json["m"] || "",
+        fields: parse_fields(json["f"] || [])
+    }
+end
+
+def parse_fields fields
+    fields
+        .select { |i| (1..2) === i["t"] } # Only keep text (1) and password (2) inputs
+        .reject { |i| i["d"] }            # Don't need input fields with default values
+        .map { |i| {name: i["n"] || "", value: i["v"] || ""} }
+end
+
 #
 # Tests
 #
@@ -392,44 +448,55 @@ def test_step2_authorization_header config
                     'YytySHVmRHllaUhrPQ=="'
 end
 
-def test_parse_onefile config
-    blob = d64 "b25lZmlsZTEHAU8FAABVlI9vpN8EKVpPnquRJrSYZ3NlbmNzdDEAAgAQAA" +
-               "AQlTM1snvUW6/VmXbjKu7l65tWu0R6/8YOu5yjBUMB24uwfGNA/EmFJuUz" +
-               "iYToeTliRlpgV6+CVfm7nJ/mwTmrHxPbkhrjLHQ+AAOeNSeEFyvxd8ntOl" +
-               "v5jCjsifPdMg/AjZbapv0PLB0z2/LOoM37SbN9JK/aF3JjYJwNsN8oEskA" +
-               "92B7qsmkawx55X5ixFc5rvcLjzL2qPkgzHxwftX1OPM6bJVQRTHQKXa7t9" +
-               "nqugLXI/ij24tGkTdbGmaOFg1nVO0+X0OubqqF41K8uO5ePSrA+e/OXvr6" +
-               "6hvvf2q168/uKNel74j20H5xJpZhY6VsgmQs3OSquOp2zJ7/TMJCnkgMuD" +
-               "mqWwY4O5KIloaoK3qMLdbKiyjmsg3QCsOBxIRw2QTWeuyhJSTcFDgauima" +
-               "oKNYxNUfi8K18/R9WBt+rLmP7v8ZKmKu2QGKbAwO05zhvXhq5VOau7R9CD" +
-               "KNVexeGbb86+cyxIcM0uf2ds9nLLMZPHUj5kYvj+frtMUQq2ToOsbEPdeG" +
-               "68tG1f4yosEkifseXfWrWzMrAGeOfh2Q1yLFCzv7ATqjAsooWR1nfk5air" +
-               "xf3nDqToPllb+C6DVHqvp8UadZXnhdj5kxvfd0BqOSu/lZFsGaJFxrGSzG" +
-               "ZTx6kxZrUUnVLOoPfNJwmcADGI0hRXbZdbmxaXHnMuRtqOXspxKsgu2H6D" +
-               "sIoJwgntGazg99oBvkf90Mf8fjCKLIiBwbcqimiR+knKhCuijE6QUvCXqV" +
-               "INHj7dBKT83jGj/rgJ/GtfpKo/Rmm6EUoEJmKZ7YSqaNlPkW1NKaQxu56M" +
-               "DWQX2Ioc3hZU6S4oPbxyXm1vy9UxhgSFctg9pSeXa+BDUTuxhRE1HZ6f0g" +
-               "lUz1sWVyE8WOToWndlRWDEM+G6+RYHlmADAq67NYLxssYC3Enej300qxY1" +
-               "pAxKlWF4MPTH+ued9IHNjTgA5bJhSRimrBEGFrESICVii3RKljDnviib1Q" +
-               "K+74vaK47Jd+jGn+8cunD7lSnilTms1u/7uqgbhXzf9426pe92WoHFpmqb" +
-               "I6FvLSvycl9oEzaVnayoGntJ2A5UJ6uROw2srChfx64uabVy0yxkU+86zH" +
-               "VuN/QJcWKSmQmR7HHrWutOizDed1+uXgj8AGb7XQiiDgpGRt4TE/WSsvjv" +
-               "6CCy+CI/xpiYrkmyezY+2OLF8v/PAW1qbwn/2ZKnRwJ3YI2DFr438CLO1O" +
-               "7xqEp0RC0+8GBlGWwZ9BfWNvE94+/QIP3pV+vojlaXPt8GeOlesCSfpFXs" +
-               "8gQmSdOoriRhxW98zGyZugwM27E/epOGKyghYfShIqVtYGtLKiF5kbvNXs" +
-               "NaiB5WgPzg/5ygh26IgsdT8U8+0cdEbmZQdhRGEsNdIOjFExZRkWlAllgS" +
-               "HfFyj0YL6U6DGlhDY9iLFjlJQlrCzo05MoatNMRt82VLfIys47YluU9wZO" +
-               "x/7QdcKd6czz4te4SAFGDmvCL5HVuAV+sPHQG5azADUGMO8g/a+ImJic+U" +
-               "/5rHTvDYMaveuWBHLi5LY7SlTnq6qju4qZXdiX8oh8xWND6DCCyg9zH7rQ" +
-               "r5c3m8z6Bq8z/9cG2cpWUXJlG+gdp3H1DFIgxmnEu8nzyVfxx0fg+TpTJy" +
-               "eMVrbH7rZ8f7uSkzKMVLSxIfnuk1yNHDsOrTpG76zXnHVil+hNczDw9MFO" +
-               "IhH7LnWjSzGX4klWJnGtWQcV2vB3qtoPvRgo24L4dUpT+6XsYJLcWdOIe0" +
-               "dRXjXomQAUTZoDmTN31Pew+nlwBrzzFgB7C5KMG9lPKlClEbXbMaFSAAAA" +
-               "AA=="
+def test_parse_accouts config
+    blob = d64 "b25lZmlsZTEHAY8GAACVds6Fe4wEu/T0DayGA/TwZ3NlbmNzdDEAAgAQAA" +
+               "AQmalFVuiCSwJ0PCCBxMZejzSjUl0mYQLyH6komWcc/2M2CS35wBIhatR7" +
+               "uI1a3+NMCvLWbFcwWY0c/1+DuUs/b8zfndMot12m9MgNijzSQfRYbL9XjH" +
+               "tIBOB66xMd4ep0bmnMlRx6rt7IPuvVIOVDB25x8vVzXJI7NaCVH/mcK5L/" +
+               "6+4Qokfo9DscH8NJv6FgxfUP7OS4U7D8HkshX7fqwWAmbMtCH42RbqS3nu" +
+               "4MM0PhIVybifOIr/wiBQaQg08lhZ5Q0mu1D0thdOL6FchljR3nWRgWmEde" +
+               "c39YBTYdaJeq6489WY2hewq/6WiALwP8w9ANDs4qSOd+pCPPx2GnRVLoCt" +
+               "A6e9Q1/iqOH+lA7u77sKLY3zkNQ1+apxhWKPvTy2hIr3Y+ZzLmr2gSMeHv" +
+               "NZJ87s9ePCtouesV/obvBfApxP8YXf28Dmegswd0GFQmC94M9EDLXUu6fG" +
+               "HNDCKEo49ht+6+6hEIV+ntE5pb4yaS4SKOKzUsLMl8UVUXCEPl1YOyaBxI" +
+               "iP/niGn5t0V49naJ/oClB/eLoiVa3ywSCTh8VgrxhEqFoIERr+yGr2hpNM" +
+               "zUebFdHZo/RW4cqi70QxmoJ1udAfn3trFVeH9ZtqV3QTCb6UOAoEJQLSIA" +
+               "ElcuwblpEz3pVaQ5eBdBQNSviEj2BphHbW4POklw1ePoxqQwNqE7VpIwJ9" +
+               "v3sU20QvTlxlQ6IRdZa4WkBMZ9hfAPNFU1OwhZfylR+cDIKxH5wSuS8oEi" +
+               "NZS7wK9i6xElA0syueih1H/Lu8dFA4Kov1rzzEq4fnIVl84BtAiJZnOg/9" +
+               "KzDXiwm2gvYvvFrA00DEdnW/uhC84ELD5UY+p19VXdWjyVWdaaml0ISWTd" +
+               "QGK4TAPZdghFGnfxZGJWmE3UEHrhW/VePMWQb1+BJqWqLwsapBThVdX+rx" +
+               "Ol8E3jo7bLbCPh3NtvNpgudy1s30ggQCEDFn1ra5PI3IfLVxgWVVNu1z5B" +
+               "of36yUC9TeXCIi5wm7a9y+g0ZXUYMDUN9UX8NxUG1bSq+4jSi+0LcVgF8h" +
+               "cmY918LeY/0miPV9JUmifItq1rUY3gi3naL99yOf534lKA3FibutuFxJ9+" +
+               "dUBPYq6Atxi/irTPfkzAr2IyFQy9JzoXXn0qflpTWIZpa6fM8R39UVzSlt" +
+               "FVcfKSsbEfFkINgBUJ3nRNoc+LDBi4/t5i0SY/QLUUE0VyS9ffHwlK/A10" +
+               "ceXELIg6phnU7HnDv86dlsm2Ey19A49QWSjtxP4vMHZhGnGhyvOpuHmt8V" +
+               "ogcgDf/JY+9SK8dQRjIijlvMqT28HUehJiOgnBENGeDmoV4g+noj3ibajp" +
+               "zMeVxfpkd9BOYer0vPMmPjBqZFFXYeGlL8k91fGaX6MEWTbFUKjupJ7JhB" +
+               "DX1lTfc6wTK5f9l8biAMZSUvqrDQ/EYpsoy4nAmCgwT7NxMbslAqY8eEWl" +
+               "3S9BIOIrOBRI2HPcWMEBVBZ25nub2mNrIjdheksdr7xm1/Zk7oa35CnDnv" +
+               "0EKC0/LV3OWSi48P2AQ96dsF+yx5wEJ9Kb5WuOvMwl31mQIwOhl35bA1um" +
+               "I6+PRf9Y6J4cfNc34olCc+8SUZMNckPWsPSM/ULpGQ1tpCicKkJBaFBWjx" +
+               "RDUuKxvANgxXgWUohyrx7X5YeXY3Y5HEY+edQCjudk6qE/gV8SCTlMwj0I" +
+               "8OXz/1okRHvZPL+86mVj5YS5rzGLTnnPn4eSEnMSQ11HRlfh5Pmp5uz/ts" +
+               "lsm+aF5B1zOJx/ryP0Uy8a5D7Dqb5juThCpDrJDxOO4SNTMSVO7jOBueit" +
+               "UvmOHaBBRHYVhItRm2BkQojDq5o+h+RVeopvcbm+cUWrwN4paja04hUe/A" +
+               "AkQ3l+71RnUy7rgozMNPQEsdZRabAQafMwKTaKS9mjP7msKTd/HHjuzd8L" +
+               "W6Mf3HuECAGIjW9GVy3MkTrSRF4O5dq3e9tTQ2Yuuv3M5TAJkjKtdhoztl" +
+               "91cJ4WjxDDYrq6sp07doR7yRi4dRymOZcFNtLEJNPESe3hiHXx7197FNtS" +
+               "W9DLyBq0Wnsmz01fS4Z+7/uGuLG8TMRfzpcwlim+R0sbqyrWGQNfIAwd11" +
+               "ngfqvYNBx6Jh7VtcZjmLdNCiM2nEAWsuvRv0RwjnZkA29iaJs/2x81cUke" +
+               "mPJk94oh+PKK5BQ1XhfzDbqhMk8FiO7NU6SRZqE48MCPNRkEhZjssSGGS4" +
+               "zpb4tKkJG+ZgJwXnEAAAA"
     json = parse_onefile blob, config["password"]
 
     check Hash === json
     check json.keys == %w{i c}
+
+    accounts = parse_accounts json
+
+    check accounts.size == 4
 end
 
 #
@@ -444,9 +511,13 @@ private_methods.grep(/^test_/).each do |i|
     send i, config
 end
 
-exit
-
 username = config["username"]
 session = login username, config["password"], http
 user_data = get_user_data session, username, http
 logout session, username, http
+
+accounts = parse_accounts parse_onefile user_data, config["password"]
+
+accounts.each_with_index do |i, index|
+    puts "#{index + 1}: #{i[:name]}, #{i[:url]}, #{i[:path]} #{i[:fields]}"
+end
